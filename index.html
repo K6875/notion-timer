@@ -8,7 +8,7 @@
     body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
     .wrap { display:flex; align-items:center; justify-content:center; min-height:100vh; background:#0b0b0c; color:#fff; }
     .card { width:min(560px, 94vw); padding:20px; border:1px solid #222; border-radius:16px; background:#111; }
-    .top { display:flex; gap:10px; align-items:center; justify-content:space-between; margin-bottom:10px; opacity:.9; }
+    .top { display:flex; gap:10px; align-items:center; justify-content:space-between; margin-bottom:10px; opacity:.95; }
     .label { font-size:14px; }
     .title { font-size:16px; font-weight:650; }
     .phase { font-size:14px; opacity:.85; text-align:center; margin-top:6px; }
@@ -21,6 +21,7 @@
       padding:10px 14px; border-radius:12px; font-size:14px; cursor:pointer;
     }
     button.primary { background:#2b2bff; border-color:#2b2bff; }
+    button:active { transform: translateY(1px); }
     select, input {
       border:1px solid #2a2a2a; background:#0f0f10; color:#fff;
       padding:10px 12px; border-radius:12px; font-size:14px;
@@ -86,14 +87,14 @@
 
 <script>
   const qs = new URLSearchParams(location.search);
-
-  // --------- Helpers
   const $ = (id) => document.getElementById(id);
+
   const fmt = (s) => {
     const m = Math.floor(s / 60);
     const r = s % 60;
     return String(m).padStart(2,'0') + ':' + String(r).padStart(2,'0');
   };
+
   function beep() {
     try {
       const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -104,34 +105,28 @@
     } catch(e) {}
   }
 
-  // --------- Label from URL
+  // Label depuis l'URL
   const label = qs.get('label') || 'Timer kiné';
   $('label').textContent = label;
 
-  // --------- Default configs (based on your kiné notes)
-  // stretch: 15s hold + 10s rest, 4 times
+  // Presets (d'après tes consignes kiné)
   const defaultStretch = { hold: 15, rest: 10, sets: 4 };
+  const defaultLR      = { left: 15, switch: 5, right: 15, rest: 10, sets: 3 };
+  const defaultMove    = { work: 40, rest: 10, sets: 4 }; // <-- repos par défaut = 10s
 
-  // lr: 15s left + 5s switch + 15s right + 10s rest, repeated 3 times
-  const defaultLR = { left: 15, switch: 5, right: 15, rest: 10, sets: 3 };
-
-  // move: work/rest for 3-4 sets (default 40/10 x 4)
-  const defaultMove = { work: 40, rest: 10, sets: 4 };
-
-  // --------- Build a "sequence" of phases (in seconds) depending on mode
-  // Each phase: { name, seconds }
   function buildSequence(mode, cfg) {
+    const seq = [];
+
     if (mode === 'stretch') {
-      const seq = [];
-      for (let i=0; i<cfg.sets; i++) {
+      for (let i = 0; i < cfg.sets; i++) {
         seq.push({ name: 'Travail (maintien)', seconds: cfg.hold });
         if (i !== cfg.sets - 1 && cfg.rest > 0) seq.push({ name: 'Repos', seconds: cfg.rest });
       }
       return seq;
     }
+
     if (mode === 'lr') {
-      const seq = [];
-      for (let i=0; i<cfg.sets; i++) {
+      for (let i = 0; i < cfg.sets; i++) {
         seq.push({ name: 'Gauche (maintien)', seconds: cfg.left });
         if (cfg.switch > 0) seq.push({ name: 'Switch', seconds: cfg.switch });
         seq.push({ name: 'Droite (maintien)', seconds: cfg.right });
@@ -139,42 +134,43 @@
       }
       return seq;
     }
-    // move
-    const seq = [];
-    for (let i=0; i<cfg.sets; i++) {
+
+    // mode === 'move'
+    for (let i = 0; i < cfg.sets; i++) {
       seq.push({ name: 'Travail (mouvements)', seconds: cfg.work });
       if (i !== cfg.sets - 1 && cfg.rest > 0) seq.push({ name: 'Repos', seconds: cfg.rest });
     }
     return seq;
   }
 
-  // --------- State
+  // State
   let timer = null;
   let currentMode = 'stretch';
   let sequence = [];
   let phaseIndex = 0;
   let remaining = 0;
   let totalSets = 4;
-  let doneSets = 1;
+
+  function running() { return !!timer; }
+  function stop() { if (timer) { clearInterval(timer); timer = null; } }
 
   function updatePills() {
     $('modePill').textContent =
       'Mode : ' + (currentMode === 'stretch' ? 'Étirement' : currentMode === 'lr' ? 'Gauche/Droite' : 'Mouvements');
 
-    // Approx "set" counter (for display):
-    // We recompute doneSets based on how many "work phases" have been completed
+    // Calcule une série "human-friendly"
     const workNames = new Set(['Travail (maintien)', 'Gauche (maintien)', 'Droite (maintien)', 'Travail (mouvements)']);
     let completedWork = 0;
-    for (let i=0; i<phaseIndex; i++) if (workNames.has(sequence[i].name)) completedWork++;
+    for (let i = 0; i < phaseIndex; i++) if (workNames.has(sequence[i].name)) completedWork++;
 
+    let serie = 1;
     if (currentMode === 'lr') {
-      // One LR "set" = left+right work phases (=2 work phases)
-      doneSets = Math.min(totalSets, Math.floor(completedWork / 2) + 1);
+      // 1 "série" = gauche+droite => 2 work phases
+      serie = Math.min(totalSets, Math.floor(completedWork / 2) + 1);
     } else {
-      // One set = 1 work phase
-      doneSets = Math.min(totalSets, completedWork + 1);
+      serie = Math.min(totalSets, completedWork + 1);
     }
-    $('counter').textContent = `Série ${doneSets}/${totalSets}`;
+    $('counter').textContent = `Série ${serie}/${totalSets}`;
   }
 
   function render() {
@@ -182,9 +178,6 @@
     $('phase').textContent = 'Phase : ' + (sequence[phaseIndex]?.name || '—');
     updatePills();
   }
-
-  function stop() { if (timer) { clearInterval(timer); timer = null; } }
-  function running() { return !!timer; }
 
   function resetToStart() {
     stop();
@@ -200,7 +193,6 @@
     if (phaseIndex >= sequence.length) {
       stop();
       $('status').textContent = 'Terminé';
-      // show 00:00
       remaining = 0;
       $('display').textContent = fmt(0);
       $('phase').textContent = 'Phase : Terminé';
@@ -221,33 +213,38 @@
     const mode = $('mode').value;
     currentMode = mode;
 
-    // Move settings
-    const work = Math.max(10, parseInt($('work').value || '40', 10));
-    const rest = Math.max(0, parseInt($('rest').value || '10', 10));
-    const sets = Math.max(1, parseInt($('sets').value || '4', 10));
+    // Valeurs UI (mode move)
+    const work = Math.max(10, parseInt($('work').value || String(defaultMove.work), 10));
+    const rest = Math.max(0,  parseInt($('rest').value || String(defaultMove.rest), 10));
+    const sets = Math.max(1,  parseInt($('sets').value || String(defaultMove.sets), 10));
 
     let cfg;
+
     if (mode === 'stretch') {
       cfg = { ...defaultStretch };
       totalSets = cfg.sets;
+      $('work').disabled = true; $('rest').disabled = true; $('sets').disabled = true;
     } else if (mode === 'lr') {
       cfg = { ...defaultLR };
       totalSets = cfg.sets;
+      $('work').disabled = true; $('rest').disabled = true; $('sets').disabled = true;
     } else {
       cfg = { ...defaultMove, work, rest, sets };
       totalSets = cfg.sets;
+      $('work').disabled = false; $('rest').disabled = false; $('sets').disabled = false;
     }
 
     sequence = buildSequence(mode, cfg);
     resetToStart();
   }
 
-  // --------- Init from URL
+  // Init depuis URL
   (function initFromURL(){
     const mode = (qs.get('mode') || 'stretch').toLowerCase();
-    const work = parseInt(qs.get('work') || defaultMove.work, 10);
-    const rest = parseInt(qs.get('rest') || defaultMove.rest, 10);
-    const sets = parseInt(qs.get('sets') || defaultMove.sets, 10);
+
+    const work = parseInt(qs.get('work') || String(defaultMove.work), 10);
+    const rest = parseInt(qs.get('rest') || String(defaultMove.rest), 10);
+    const sets = parseInt(qs.get('sets') || String(defaultMove.sets), 10);
 
     $('mode').value = (mode === 'lr' || mode === 'move' || mode === 'stretch') ? mode : 'stretch';
     $('work').value = String(isFinite(work) ? work : defaultMove.work);
@@ -257,7 +254,7 @@
     applyModeFromUI();
   })();
 
-  // --------- Events
+  // Events
   $('start').onclick = () => {
     if (running()) return;
     $('status').textContent = 'En cours';
