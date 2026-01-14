@@ -61,7 +61,8 @@
           <div class="label" style="margin:6px 0 6px;">Mode</div>
           <select id="mode">
             <option value="stretch">Étirement (15s + repos × 4)</option>
-            <option value="lr">Gauche / Droite (15s G + switch + 15s D × 3)</option>
+            <option value="lr">Gauche/Droite alterné (G + switch + D × 3)</option>
+            <option value="lrblock">Gauche x3 puis Droite x3 (× 3 séries)</option>
             <option value="move">Mouvements (30–40s + repos × 4)</option>
           </select>
         </div>
@@ -79,7 +80,9 @@
 
       <div class="hint">
         URLs utiles :<br>
-        <b>?mode=stretch&label=Exo%201</b> • <b>?mode=lr&label=Exo%202</b> •
+        <b>?mode=stretch&label=Exo%201</b> •
+        <b>?mode=lr&label=Exo%202</b> •
+        <b>?mode=lrblock&label=Exo%20LR%20bloc</b> •
         <b>?mode=move&work=40&rest=10&sets=4&label=Exo%203</b>
       </div>
     </div>
@@ -109,10 +112,18 @@
   const label = qs.get('label') || 'Timer kiné';
   $('label').textContent = label;
 
-  // Presets (d'après tes consignes kiné)
+  // Presets kiné
   const defaultStretch = { hold: 15, rest: 10, sets: 4 };
+
+  // LR alterné : 15s gauche, 5s switch, 15s droite, 10s repos, le tout x3
   const defaultLR      = { left: 15, switch: 5, right: 15, rest: 10, sets: 3 };
-  const defaultMove    = { work: 40, rest: 10, sets: 4 }; // <-- repos par défaut = 10s
+
+  // LR bloc : (gauche x3) puis switch 20s puis (droite x3), puis repos 10s, le tout x3 séries
+  // Chaque "maintien" = 15s, petit repos entre maintiens = 10s
+  const defaultLRBlock = { hold: 15, intraRest: 10, switch: 20, seriesRest: 10, repsPerSide: 3, sets: 3 };
+
+  // Mouvements : work/rest x sets
+  const defaultMove    = { work: 40, rest: 10, sets: 4 };
 
   function buildSequence(mode, cfg) {
     const seq = [];
@@ -135,7 +146,30 @@
       return seq;
     }
 
-    // mode === 'move'
+    if (mode === 'lrblock') {
+      for (let s = 0; s < cfg.sets; s++) {
+        // Bloc gauche : 3 maintiens
+        for (let r = 0; r < cfg.repsPerSide; r++) {
+          seq.push({ name: `Gauche (maintien ${r+1}/${cfg.repsPerSide})`, seconds: cfg.hold });
+          if (r !== cfg.repsPerSide - 1 && cfg.intraRest > 0) seq.push({ name: 'Repos court', seconds: cfg.intraRest });
+        }
+
+        // Switch long
+        if (cfg.switch > 0) seq.push({ name: 'Changement de côté', seconds: cfg.switch });
+
+        // Bloc droite : 3 maintiens
+        for (let r = 0; r < cfg.repsPerSide; r++) {
+          seq.push({ name: `Droite (maintien ${r+1}/${cfg.repsPerSide})`, seconds: cfg.hold });
+          if (r !== cfg.repsPerSide - 1 && cfg.intraRest > 0) seq.push({ name: 'Repos court', seconds: cfg.intraRest });
+        }
+
+        // Repos entre séries
+        if (s !== cfg.sets - 1 && cfg.seriesRest > 0) seq.push({ name: 'Repos série', seconds: cfg.seriesRest });
+      }
+      return seq;
+    }
+
+    // move
     for (let i = 0; i < cfg.sets; i++) {
       seq.push({ name: 'Travail (mouvements)', seconds: cfg.work });
       if (i !== cfg.sets - 1 && cfg.rest > 0) seq.push({ name: 'Repos', seconds: cfg.rest });
@@ -155,18 +189,29 @@
   function stop() { if (timer) { clearInterval(timer); timer = null; } }
 
   function updatePills() {
-    $('modePill').textContent =
-      'Mode : ' + (currentMode === 'stretch' ? 'Étirement' : currentMode === 'lr' ? 'Gauche/Droite' : 'Mouvements');
+    const map = {
+      stretch: 'Étirement',
+      lr: 'G/D alterné',
+      lrblock: 'G/D bloc',
+      move: 'Mouvements'
+    };
+    $('modePill').textContent = 'Mode : ' + (map[currentMode] || currentMode);
 
-    // Calcule une série "human-friendly"
+    // Série "human-friendly"
+    // - stretch: 1 work = 1 série
+    // - move: 1 work = 1 série
+    // - lr: 1 "série" = gauche+droite = 2 work phases
+    // - lrblock: on affiche l'index de série via "Repos série"/fin
     const workNames = new Set(['Travail (maintien)', 'Gauche (maintien)', 'Droite (maintien)', 'Travail (mouvements)']);
     let completedWork = 0;
     for (let i = 0; i < phaseIndex; i++) if (workNames.has(sequence[i].name)) completedWork++;
 
     let serie = 1;
     if (currentMode === 'lr') {
-      // 1 "série" = gauche+droite => 2 work phases
       serie = Math.min(totalSets, Math.floor(completedWork / 2) + 1);
+    } else if (currentMode === 'lrblock') {
+      // 1 série = 6 maintiens (3G + 3D)
+      serie = Math.min(totalSets, Math.floor(completedWork / 6) + 1);
     } else {
       serie = Math.min(totalSets, completedWork + 1);
     }
@@ -213,7 +258,6 @@
     const mode = $('mode').value;
     currentMode = mode;
 
-    // Valeurs UI (mode move)
     const work = Math.max(10, parseInt($('work').value || String(defaultMove.work), 10));
     const rest = Math.max(0,  parseInt($('rest').value || String(defaultMove.rest), 10));
     const sets = Math.max(1,  parseInt($('sets').value || String(defaultMove.sets), 10));
@@ -226,6 +270,10 @@
       $('work').disabled = true; $('rest').disabled = true; $('sets').disabled = true;
     } else if (mode === 'lr') {
       cfg = { ...defaultLR };
+      totalSets = cfg.sets;
+      $('work').disabled = true; $('rest').disabled = true; $('sets').disabled = true;
+    } else if (mode === 'lrblock') {
+      cfg = { ...defaultLRBlock };
       totalSets = cfg.sets;
       $('work').disabled = true; $('rest').disabled = true; $('sets').disabled = true;
     } else {
@@ -241,12 +289,11 @@
   // Init depuis URL
   (function initFromURL(){
     const mode = (qs.get('mode') || 'stretch').toLowerCase();
-
     const work = parseInt(qs.get('work') || String(defaultMove.work), 10);
     const rest = parseInt(qs.get('rest') || String(defaultMove.rest), 10);
     const sets = parseInt(qs.get('sets') || String(defaultMove.sets), 10);
 
-    $('mode').value = (mode === 'lr' || mode === 'move' || mode === 'stretch') ? mode : 'stretch';
+    $('mode').value = (mode === 'lr' || mode === 'lrblock' || mode === 'move' || mode === 'stretch') ? mode : 'stretch';
     $('work').value = String(isFinite(work) ? work : defaultMove.work);
     $('rest').value = String(isFinite(rest) ? rest : defaultMove.rest);
     $('sets').value = String(isFinite(sets) ? sets : defaultMove.sets);
