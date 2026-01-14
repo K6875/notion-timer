@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Notion Timer</title>
+  <style>
+    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
+    .wrap { display:flex; align-items:center; justify-content:center; min-height:100vh; background:#0b0b0c; color:#fff; }
+    .card { width:min(520px, 94vw); padding:22px; border:1px solid #222; border-radius:16px; background:#111; }
+    .top { display:flex; gap:10px; align-items:center; justify-content:space-between; margin-bottom:12px; opacity:.9; }
+    .label { font-size:14px; }
+    .time { font-size:64px; font-weight:700; letter-spacing:1px; text-align:center; margin:12px 0 18px; }
+    .row { display:flex; gap:10px; flex-wrap:wrap; justify-content:center; }
+    button {
+      border:1px solid #2a2a2a; background:#171717; color:#fff;
+      padding:10px 14px; border-radius:12px; font-size:14px; cursor:pointer;
+    }
+    button.primary { background:#2b2bff; border-color:#2b2bff; }
+    button:active { transform: translateY(1px); }
+    .hint { margin-top:14px; font-size:12px; opacity:.65; text-align:center; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="top">
+        <div class="label" id="label">Timer</div>
+        <div class="label">Compte à rebours</div>
+      </div>
+
+      <div class="time" id="display">00:30</div>
+
+      <div class="row">
+        <button class="primary" id="start">Start</button>
+        <button id="pause">Pause</button>
+        <button id="reset">Reset</button>
+      </div>
+
+      <div class="row" style="margin-top:10px;">
+        <button data-set="15">15s</button>
+        <button data-set="30">30s</button>
+        <button data-set="45">45s</button>
+        <button data-set="60">60s</button>
+        <button data-set="90">90s</button>
+        <button data-set="120">120s</button>
+      </div>
+
+      <div class="hint">
+        Paramètres : ajoute <b>?t=45&label=Exo%202</b> à l’URL.
+      </div>
+    </div>
+  </div>
+
+<script>
+  const qs = new URLSearchParams(location.search);
+  const initial = Math.max(1, parseInt(qs.get('t') || '30', 10));
+  const label = qs.get('label') || 'Timer';
+
+  const $ = (id) => document.getElementById(id);
+  $('label').textContent = label;
+
+  let defaultSeconds = initial;
+  let remaining = defaultSeconds;
+  let timer = null;
+
+  function fmt(s) {
+    const m = Math.floor(s / 60);
+    const r = s % 60;
+    return String(m).padStart(2,'0') + ':' + String(r).padStart(2,'0');
+  }
+  function render() { $('display').textContent = fmt(remaining); }
+  function stop() { if (timer) { clearInterval(timer); timer = null; } }
+  function beep() {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const o = ctx.createOscillator(); const g = ctx.createGain();
+      o.type = 'sine'; o.frequency.value = 880; g.gain.value = 0.05;
+      o.connect(g); g.connect(ctx.destination);
+      o.start(); setTimeout(()=>{ o.stop(); ctx.close(); }, 250);
+    } catch(e) {}
+  }
+
+  render();
+
+  $('start').onclick = () => {
+    if (timer) return;
+    timer = setInterval(() => {
+      remaining = Math.max(0, remaining - 1);
+      render();
+      if (remaining === 0) { stop(); beep(); }
+    }, 1000);
+  };
+
+  $('pause').onclick = () => stop();
+
+  $('reset').onclick = () => {
+    stop();
+    remaining = defaultSeconds;
+    render();
+  };
+
+  document.querySelectorAll('button[data-set]').forEach(btn => {
+    btn.onclick = () => {
+      const s = parseInt(btn.dataset.set, 10);
+      defaultSeconds = s;
+      s
